@@ -103,9 +103,21 @@ pub fn SearchTree(comptime Token: type) type {
                 return null;
             }
 
+            fn check_rules(self: *EntryState, ch: u8) ?*State {
+                for (self.entry_rules) |rule| {
+                    if (rule.rule(ch)) {
+                        return rule.state;
+                    }
+                }
+
+                return null;
+            }
+
             fn __traverse(ptr: *anyopaque, ch: u8) State.ReturnStatus {
                 const self: *EntryState = @ptrCast(@alignCast(ptr));
                 if (self.entry_points[ch]) |state| {
+                    return .{ .Changed = state };
+                } else if (self.check_rules(ch)) |state| {
                     return .{ .Changed = state };
                 } else {
                     return .Exited;

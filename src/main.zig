@@ -7,7 +7,6 @@ const Token = enum {
     Tesselate,
     Other,
 
-
     pub fn format(self: *const Token, writer: *std.io.Writer) std.io.Writer.Error!void {
         switch (self.*) {
             .Test => try writer.print("Test", .{}),
