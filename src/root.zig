@@ -7,12 +7,16 @@ const std = @import("std");
 // MODULES -----
 pub const SearchTree = @import("search-tree.zig").SearchTree;
 
-pub fn TokenStream(comptime Token: type) type {
-    switch (@typeInfo(Token)) {
-        .@"enum", .@"union" => {},
-        else => @compileError("Tokens must be of type enum or union"),
-    }
+pub fn aliases(comptime Token: type) type {
+    return struct {
+        pub const State = SearchTree(Token).State;
+        pub const KeywordToken = SearchTree(Token).Generator.KeywordToken;
+        pub const CustomState = SearchTree(Token).Generator.CustomState;
+        pub const EntryStateRule = SearchTree(Token).EntryState.EntryStateRule;
+    };
+}
 
+pub fn TokenStream(comptime Token: type) type {
     return struct {
         tokens: []Token,
 
@@ -35,7 +39,11 @@ pub fn TokenStream(comptime Token: type) type {
             buffer: []u8,
             buffer_size: usize = 0,
 
-            fn init(gpa: std.mem.Allocator, tree: SearchTree(Token), string: []const u8) !Tokenizer {
+            fn init(
+                gpa: std.mem.Allocator, 
+                tree: SearchTree(Token), 
+                string: []const u8
+            ) !Tokenizer {
                 return .{
                     .gpa = gpa,
                     .tokens = try gpa.alloc(Token, DEFAULT_TOKEN_BUFFER_CAPACITY),
@@ -125,7 +133,11 @@ pub fn TokenStream(comptime Token: type) type {
 
         };
 
-        pub fn init(gpa: std.mem.Allocator, tree: SearchTree(Token), string: []const u8) !TokenStream(Token) {
+        pub fn init(
+            gpa: std.mem.Allocator, 
+            tree: SearchTree(Token), 
+            string: []const u8
+        ) !TokenStream(Token) {
             var tokenizer: Tokenizer = try .init(gpa, tree, string);
             try tokenizer.tokenize();
             return try tokenizer.finish();

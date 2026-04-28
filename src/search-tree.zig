@@ -4,7 +4,6 @@
 // INCLUDES -----
 const std = @import("std");
 
-
 pub fn SearchTree(comptime Token: type) type {
     return struct {
 
@@ -14,7 +13,7 @@ pub fn SearchTree(comptime Token: type) type {
         pub const State = struct {
             vtable: *const VTable,
 
-            const ReturnStatus = union(enum) {
+            pub const ReturnStatus = union(enum) {
                 Exited,
                 Break,
                 Changed: *State,
