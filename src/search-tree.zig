@@ -88,6 +88,12 @@ pub fn SearchTree(comptime Token: type) type {
 
             vtable: *const State.VTable = &__vtable,
             entry_points: [256]?*State,
+            entry_rules: []const EntryStateRule,
+
+            pub const EntryStateRule = struct {
+                rule: *const fn(u8) anyerror!bool,
+                state: *State,
+            };
 
             pub const Error = error {
                 StateAlreadyBound,
@@ -123,10 +129,11 @@ pub fn SearchTree(comptime Token: type) type {
                 }
             }
 
-            pub fn new(gpa: std.mem.Allocator) !*EntryState {
+            pub fn new(gpa: std.mem.Allocator, entry_rules: []const EntryStateRule) !*EntryState {
                 const state = try gpa.create(EntryState);
                 state.*.vtable = &__vtable;
                 state.*.entry_points = [_]?*State{null} ** 256;
+                state.*.entry_rules = entry_rules;
 
                 return state;
             }
@@ -192,7 +199,13 @@ pub fn SearchTree(comptime Token: type) type {
                 return state;
             }
 
-            pub fn attach_child(self: *KeywordState, gpa: std.mem.Allocator, character: u8, token: ?Token, breaks: bool) !*KeywordState {
+            pub fn attach_child(
+                self: *KeywordState, 
+                gpa: std.mem.Allocator, 
+                character: u8, 
+                token: ?Token, 
+                breaks: bool
+            ) !*KeywordState {
                 if (self.children[character]) |child| {
                     if (child.token == null) {
                         child.*.token = token;
@@ -243,8 +256,13 @@ pub fn SearchTree(comptime Token: type) type {
                 MismatchingKeywordTokenArrays,
             };
 
-            pub fn init(gpa: std.mem.Allocator, keywords: []const KeywordToken, custom_states: ?[]const CustomState) !Generator {
-                const head = try EntryState.new(gpa);
+            pub fn init(
+                gpa: std.mem.Allocator, 
+                keywords: []const KeywordToken, 
+                custom_states: ?[]const CustomState, 
+                entry_rules: []const EntryState.EntryStateRule
+            ) !Generator {
+                const head = try EntryState.new(gpa, entry_rules);
 
                 return .{
                     .gpa = gpa,
@@ -274,7 +292,12 @@ pub fn SearchTree(comptime Token: type) type {
                 };
             }
 
-            pub fn attach_current(self: *Generator, ch: u8, token: ?Token, breaks: bool) !*KeywordState {
+            pub fn attach_current(
+                self: *Generator, 
+                ch: u8, 
+                token: ?Token, 
+                breaks: bool
+            ) !*KeywordState {
                 switch (self.*.current) {
                     .entry => |entry| {
                         const state = try KeywordState.new(self.gpa, token, breaks);
@@ -304,8 +327,14 @@ pub fn SearchTree(comptime Token: type) type {
         };
 
 
-        pub fn init(gpa: std.mem.Allocator, keyword_tokens: []const Generator.KeywordToken, fallback: FallbackState.Fallback, custom_states: ?[]const Generator.CustomState) !SearchTree(Token) {
-            var gen: Generator = try .init(gpa, keyword_tokens, custom_states);
+        pub fn init(
+            gpa: std.mem.Allocator,
+            keyword_tokens: []const Generator.KeywordToken,
+            fallback: FallbackState.Fallback,
+            custom_states: ?[]const Generator.CustomState,
+            entry_rules: []const EntryState.EntryStateRule
+        ) !SearchTree(Token) {
+            var gen: Generator = try .init(gpa, keyword_tokens, custom_states, entry_rules);
             try gen.generate();
             return try gen.finish(fallback);
         }
