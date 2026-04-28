@@ -5,20 +5,41 @@ const zoken = @import("Zoken");
 const Token = enum {
     Test,
     Tesselate,
+    Other,
+
+
+    pub fn format(self: *const Token, writer: *std.io.Writer) std.io.Writer.Error!void {
+        switch (self.*) {
+            .Test => try writer.print("Test", .{}),
+            .Tesselate => try writer.print("Tesselate", .{}),
+            .Other => try writer.print("other", .{}),
+        }
+    }
 };
+
+fn identifier_fallback(_: []const u8) anyerror!Token {
+    return .Other;
+}
 
 pub fn main() !void {
     const gpa = std.heap.page_allocator;
 
-    var st: zoken.SearchTree(Token) = try .init(gpa, &.{
-        "test",
-        "tes",
-    }, &.{
-        .Test,
-        .Tesselate,
-    });
+    var st: zoken.SearchTree(Token) = try .init(
+        gpa,
+        &.{
+            "test",
+            "tes",
+        }, 
+        &.{
+            .Test,
+            .Tesselate,
+        },
+        identifier_fallback,
+    );
     defer st.deinit(gpa);
 
-    const tk = try st.keywords.traverse('t').Changed.traverse('e').Changed.traverse('s').Changed.construct("test");
-    std.debug.assert(tk == .Tesselate);
+    const str = "test ing";
+
+    const ts = try zoken.TokenStream(Token).init(gpa, st, str);
+    std.debug.print("{f}", .{ts});
 }

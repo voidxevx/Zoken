@@ -8,22 +8,25 @@ pub fn SearchTree(comptime Token: type) type {
     return struct {
 
         keywords: *State,
+        fallback_state: *SearchTree(Token).FallbackState,
 
         pub const State = struct {
             vtable: *const VTable,
 
             const ReturnStatus = union(enum) {
                 Exited,
+                Break,
                 Changed: *State,
+                Stays,
             };
 
             const VTable = struct {
-                construct: *const fn(*anyopaque, []const u8) anyerror!Token,
+                construct: *const fn(*anyopaque, []const u8) anyerror!?Token,
                 traverse: *const fn(*anyopaque, u8) ReturnStatus,
                 deinit: *const fn(*anyopaque, std.mem.Allocator) void,
             };
 
-            pub fn construct(self: *State, buffer: []const u8) anyerror!Token {
+            pub fn construct(self: *State, buffer: []const u8) anyerror!?Token {
                 return self.vtable.construct(self, buffer);
             }
 
@@ -33,6 +36,45 @@ pub fn SearchTree(comptime Token: type) type {
 
             pub fn deinit(self: *State, gpa: std.mem.Allocator) void {
                 self.vtable.deinit(self, gpa);
+            }
+        };
+
+        pub const FallbackState = struct {
+            const __vtable: State.VTable = .{
+                .construct = FallbackState.__construct,
+                .traverse = FallbackState.__traverse,
+                .deinit = FallbackState.__deinit,
+            };
+
+            vtable: *const State.VTable = &__vtable,
+            fallback: Fallback,
+
+            const Fallback = *const fn([]const u8) anyerror!Token;
+
+            fn __construct(ptr: *anyopaque, buffer: []const u8) anyerror!?Token {
+                const self: *FallbackState = @ptrCast(@alignCast(ptr));
+                return try self.fallback(buffer);
+            }
+
+            fn __traverse(_: *anyopaque, _: u8) State.ReturnStatus {
+                return .Stays;
+            }
+
+            fn __deinit(ptr: *anyopaque, gpa: std.mem.Allocator) void {
+                const self: *FallbackState = @ptrCast(@alignCast(ptr));
+                gpa.destroy(self);
+            }
+
+            pub fn new(gpa: std.mem.Allocator, fallback: Fallback) !*FallbackState {
+                const self = try gpa.create(FallbackState);
+                self.*.vtable = &__vtable;
+                self.*.fallback = fallback;
+
+                return self;
+            }
+
+            pub fn interface(self: *FallbackState) *State {
+                return @ptrCast(@alignCast(self));
             }
         };
 
@@ -48,16 +90,15 @@ pub fn SearchTree(comptime Token: type) type {
             children: [256]?*KeywordState,
 
             const Error = error {
-                CannotConstructToken,
                 TokenAlreadyBound,
             };
 
-            fn __construct(ptr: *anyopaque, _: []const u8) anyerror!Token {
+            fn __construct(ptr: *anyopaque, _: []const u8) anyerror!?Token {
                 const self: *KeywordState = @ptrCast(@alignCast(ptr));
                 if (self.token) |token| {
                     return token;
                 } else {
-                    return Error.CannotConstructToken;
+                    return null;
                 }
             }
 
@@ -144,9 +185,10 @@ pub fn SearchTree(comptime Token: type) type {
                 }
             }
 
-            pub fn finish(self: *Generator) SearchTree(Token) {
+            pub fn finish(self: *Generator, fallback: FallbackState.Fallback) !SearchTree(Token) {
                 return .{
                     .keywords = self.keyword_head.interface(),
+                    .fallback_state = try FallbackState.new(self.gpa, fallback),
                 };
             }
 
@@ -163,10 +205,10 @@ pub fn SearchTree(comptime Token: type) type {
         };
 
 
-        pub fn init(gpa: std.mem.Allocator, keywords: []const []const u8, tokens: []const Token) !SearchTree(Token) {
+        pub fn init(gpa: std.mem.Allocator, keywords: []const []const u8, tokens: []const Token, fallback: FallbackState.Fallback) !SearchTree(Token) {
             var gen: Generator = try .init(gpa, keywords, tokens);
             try gen.generate();
-            return gen.finish();
+            return try gen.finish(fallback);
         }
 
         pub fn deinit(self: *SearchTree(Token), gpa: std.mem.Allocator) void {
