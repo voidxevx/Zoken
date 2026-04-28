@@ -4,41 +4,63 @@
 // INCLUDES -----
 const std = @import("std");
 
+/// Search tree that is iterated downward to match a token symbol
 pub fn SearchTree(comptime Token: type) type {
     return struct {
 
+        /// The head of the keywords tree
         keywords: *State,
+        /// the fallback state for when the main tree is exited
         fallback_state: *SearchTree(Token).FallbackState,
 
+        /// State interface class
+        /// 
+        /// Uses manual polymorphism since zig is dumb
         pub const State = struct {
             vtable: *const VTable,
 
+            /// The status of the state
             pub const ReturnStatus = union(enum) {
+                /// Exited -> go to fallback
                 Exited,
+                /// Break -> push the token
                 Break,
+                /// Changed -> switches to a different state
                 Changed: *State,
+                /// Stays in the current state
                 Stays,
             };
 
+            /// The virtual table of the state
+            /// 
+            /// used for dynamic dispatching
             const VTable = struct {
                 construct: *const fn(*anyopaque, []const u8) anyerror!?Token,
                 traverse: *const fn(*anyopaque, u8) ReturnStatus,
                 deinit: *const fn(*anyopaque, std.mem.Allocator) void,
             };
 
+            /// Constructs a token from a buffer
             pub fn construct(self: *State, buffer: []const u8) anyerror!?Token {
                 return self.vtable.construct(self, buffer);
             }
 
+            /// attempt to traverse to another state
             pub fn traverse(self: *State, ch: u8) ReturnStatus {
                 return self.vtable.traverse(self, ch);
             }
 
+            /// deallocates the state and any of its children
             pub fn deinit(self: *State, gpa: std.mem.Allocator) void {
                 self.vtable.deinit(self, gpa);
             }
         };
 
+        /// Fallback State
+        /// 
+        /// The fallback state is used when the currently tokenized string doesn't match anything in the search tree.
+        /// The fallback state won't exit until forced by a whitespace character. Once exited it will dynamically
+        /// call the fallback function it was provided.
         pub const FallbackState = struct {
             const __vtable: State.VTable = .{
                 .construct = FallbackState.__construct,
@@ -47,6 +69,7 @@ pub fn SearchTree(comptime Token: type) type {
             };
 
             vtable: *const State.VTable = &__vtable,
+            /// The fallback function that is called to construct a token
             fallback: Fallback,
 
             const Fallback = *const fn([]const u8) anyerror!Token;
@@ -78,6 +101,9 @@ pub fn SearchTree(comptime Token: type) type {
             }
         };
 
+        /// Entry State
+        /// 
+        /// The head state of the search tree that allows the search tree to use custom states with custom rules.
         pub const EntryState = struct {
             const __vtable: State.VTable = .{
                 .construct = EntryState.__construct,
@@ -86,9 +112,12 @@ pub fn SearchTree(comptime Token: type) type {
             };
 
             vtable: *const State.VTable = &__vtable,
+            /// Generic character entry states
             entry_points: [256]?*State,
+            /// optional custom rules for a state entry point
             entry_rules: []const EntryStateRule,
 
+            /// A rule for entering a custom state
             pub const EntryStateRule = struct {
                 rule: *const fn(u8) anyerror!bool,
                 state: *State,
@@ -102,6 +131,7 @@ pub fn SearchTree(comptime Token: type) type {
                 return null;
             }
 
+            /// Checks all custom rules for optional state enterances
             fn check_rules(self: *EntryState, ch: u8) ?*State {
                 for (self.entry_rules) |rule| {
                     if (rule.rule(ch)) {
@@ -132,6 +162,7 @@ pub fn SearchTree(comptime Token: type) type {
                 gpa.destroy(self);
             }
 
+            /// Attaches a state to a character
             pub fn attach_state(self: *EntryState, ch: u8, state: *State) Error!void {
                 if (self.entry_points[ch] == null) {
                     self.*.entry_points[ch] = state;
@@ -154,7 +185,12 @@ pub fn SearchTree(comptime Token: type) type {
             }
         };
 
-
+        /// Keyword state
+        /// 
+        /// Main node states that create the search tree. Each state points to up to 256 other states 
+        /// that each represent a character that could procede this one. If there is no matching character
+        /// that procedes this state it will optionally break pushing the token at the current point of exit 
+        /// and procceed to the fallback state.
         pub const KeywordState = struct {
             const __vtable: State.VTable = .{
                 .construct = KeywordState.__construct,
@@ -163,8 +199,12 @@ pub fn SearchTree(comptime Token: type) type {
             };
 
             vtable: *const State.VTable = &__vtable,
+            /// The token that it could possibly create.
+            /// This is optional since not every state can create a token
             token: ?Token,
+            /// All of the child states that this one could continue to
             children: [256]?*KeywordState,
+            // If the state will break once it no longer matches
             force_break: bool,
 
             const Error = error {
@@ -210,6 +250,7 @@ pub fn SearchTree(comptime Token: type) type {
                 return state;
             }
 
+            /// Attaches another keyword state to the tree
             pub fn attach_child(
                 self: *KeywordState, 
                 gpa: std.mem.Allocator, 
@@ -237,14 +278,21 @@ pub fn SearchTree(comptime Token: type) type {
             }
         };
 
+        /// Generates a search tree from a set of keyword tokens
         pub const Generator = struct {
 
+            /// General purpose allocator
             gpa: std.mem.Allocator,
 
+            /// List of keywords and tokens
             keyword_tokens: []const KeywordToken,
+            /// Optional list of custom states that the search tree can have.
             custom_states: ?[]const CustomState,
 
+            /// The head of the search tree
             keyword_head: *EntryState,
+            /// The state that is currently being attached too. 
+            /// Could be either a keyword state or the entry pint state
             current: AttachmentState,
 
             const AttachmentState = union(enum) {
@@ -252,12 +300,15 @@ pub fn SearchTree(comptime Token: type) type {
                 entry: *EntryState,
             };
 
+            /// A keyword and token pair
             pub const KeywordToken = struct {
                 symbol: []const u8,
                 token: Token,
+                /// if the keyword should be broken at instead of exited
                 force_break: bool = false,
             };
 
+            /// A custom state tied to a character
             pub const CustomState = struct {
                 entry_character: u8,
                 state: *State,
@@ -284,6 +335,7 @@ pub fn SearchTree(comptime Token: type) type {
                 };
             }
 
+            /// Generates the search tree
             pub fn generate(self: *Generator) !void {
                 for (0..self.keyword_tokens.len) |i| {
                     const kw = self.keyword_tokens[i];
@@ -296,6 +348,7 @@ pub fn SearchTree(comptime Token: type) type {
                 };
             }
 
+            /// Finishes generating creating the full search tree
             pub fn finish(self: *Generator, fallback: FallbackState.Fallback) !SearchTree(Token) {
                 return .{
                     .keywords = self.keyword_head.interface(),
@@ -303,6 +356,7 @@ pub fn SearchTree(comptime Token: type) type {
                 };
             }
 
+            /// Attaches a keyword state to the current state
             pub fn attach_current(
                 self: *Generator, 
                 ch: u8, 
@@ -321,6 +375,7 @@ pub fn SearchTree(comptime Token: type) type {
                 }
             }
 
+            /// Traces a keyword generating a branch from its characters
             fn trace_branch(self: *Generator, keyword_token: KeywordToken) !void {
                 const keyword = keyword_token.symbol;
                 const token = keyword_token.token;
