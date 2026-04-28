@@ -4,6 +4,7 @@
 // INCLUDES -----
 const std = @import("std");
 
+
 pub fn SearchTree(comptime Token: type) type {
     return struct {
 
@@ -88,6 +89,7 @@ pub fn SearchTree(comptime Token: type) type {
             vtable: *const State.VTable = &__vtable,
             token: ?Token,
             children: [256]?*KeywordState,
+            force_break: bool,
 
             const Error = error {
                 TokenAlreadyBound,
@@ -104,8 +106,11 @@ pub fn SearchTree(comptime Token: type) type {
 
             fn __traverse(ptr: *anyopaque, ch: u8) State.ReturnStatus {
                 const self: *KeywordState = @ptrCast(@alignCast(ptr));
+                std.debug.print("to: {c}, breaks: {}\n", .{ch, self.force_break});
                 if (self.children[ch]) |child| {
                     return .{ .Changed = child.interface() };
+                } else if (self.force_break) {
+                    return .Break;
                 } else {
                     return .Exited;
                 }
@@ -120,25 +125,27 @@ pub fn SearchTree(comptime Token: type) type {
                 gpa.destroy(self);
             }
 
-            pub fn new(gpa: std.mem.Allocator, token: ?Token) !*KeywordState {
+            pub fn new(gpa: std.mem.Allocator, token: ?Token, breaks: bool) !*KeywordState {
                 const state = try gpa.create(KeywordState);
                 state.*.vtable = &__vtable;
                 state.*.token = token;
                 state.*.children = [_]?*KeywordState{null} ** 256;
+                state.*.force_break = breaks;
 
                 return state;
             }
 
-            pub fn attach_child(self: *KeywordState, gpa: std.mem.Allocator, character: u8, token: ?Token) !*KeywordState {
+            pub fn attach_child(self: *KeywordState, gpa: std.mem.Allocator, character: u8, token: ?Token, breaks: bool) !*KeywordState {
                 if (self.children[character]) |child| {
                     if (child.token == null) {
                         child.*.token = token;
                     } else {
                         return Error.TokenAlreadyBound;
                     }
+                    child.*.force_break = breaks;
                     return child;
                 } else {
-                    const child = try KeywordState.new(gpa, token);
+                    const child = try KeywordState.new(gpa, token, breaks);
                     self.*.children[character] = child;
                     return child;
                 }
@@ -153,35 +160,41 @@ pub fn SearchTree(comptime Token: type) type {
 
             gpa: std.mem.Allocator,
 
-            keywords: []const []const u8,
-            tokens: []const Token,
+            // keywords: []const []const u8,
+            // tokens: []const Token,
+            keyword_tokens: []const KeywordToken,
 
             keyword_head: *KeywordState,
             current: *KeywordState,
+
+            pub const KeywordToken = struct {
+                symbol: []const u8,
+                token: Token,
+                force_break: bool = false,
+            };
 
             const Error = error {
                 MismatchingKeywordTokenArrays,
             };
 
-            pub fn init(gpa: std.mem.Allocator, keywords: []const []const u8, tokens: []const Token) !Generator {
-                const head = try KeywordState.new(gpa, null);
+            pub fn init(gpa: std.mem.Allocator, keywords: []const KeywordToken) !Generator {
+                const head = try KeywordState.new(gpa, null, false);
                 return .{
                     .gpa = gpa,
-                    .keywords = keywords,
-                    .tokens = tokens,
+                    // .keywords = keywords,
+                    // .tokens = tokens,
+                    .keyword_tokens = keywords,
                     .keyword_head = head,
                     .current = head,
                 };
             }
 
             pub fn generate(self: *Generator) !void {
-                if (self.keywords.len != self.tokens.len)
-                    return Error.MismatchingKeywordTokenArrays;
-
-                for (0..self.keywords.len) |i| {
-                    const kw: []const u8 = self.keywords[i];
-                    const tk: Token = self.tokens[i];
-                    try self.trace_branch(kw, tk);
+                for (0..self.keyword_tokens.len) |i| {
+                    // const kw: []const u8 = self.keywords[i];
+                    // const tk: Token = self.tokens[i];
+                    const kw = self.keyword_tokens[i];
+                    try self.trace_branch(kw);
                 }
             }
 
@@ -192,21 +205,25 @@ pub fn SearchTree(comptime Token: type) type {
                 };
             }
 
-            fn trace_branch(self: *Generator, keyword: []const u8, token: Token) !void {
+            fn trace_branch(self: *Generator, keyword_token: KeywordToken) !void {
+                const keyword = keyword_token.symbol;
+                const token = keyword_token.token;
+                const breaks = keyword_token.force_break;
+
                 for (0..keyword.len - 1) |i| {
                     const ch: u8 = keyword[i];
-                    self.*.current = try self.*.current.attach_child(self.gpa, ch, null);
+                    self.*.current = try self.*.current.attach_child(self.gpa, ch, null, false);
                 }
 
                 const ch: u8 = keyword[keyword.len - 1];
-                _ = try self.*.current.attach_child(self.gpa, ch, token);
+                _ = try self.*.current.attach_child(self.gpa, ch, token, breaks);
                 self.*.current = self.keyword_head;
             }
         };
 
 
-        pub fn init(gpa: std.mem.Allocator, keywords: []const []const u8, tokens: []const Token, fallback: FallbackState.Fallback) !SearchTree(Token) {
-            var gen: Generator = try .init(gpa, keywords, tokens);
+        pub fn init(gpa: std.mem.Allocator, keyword_tokens: []const Generator.KeywordToken, fallback: FallbackState.Fallback) !SearchTree(Token) {
+            var gen: Generator = try .init(gpa, keyword_tokens);
             try gen.generate();
             return try gen.finish(fallback);
         }

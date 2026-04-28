@@ -27,18 +27,21 @@ pub fn main() !void {
     var st: zoken.SearchTree(Token) = try .init(
         gpa,
         &.{
-            "test",
-            "tes",
+            .{
+                .symbol = "test",
+                .token = .Test,
+            },
+            .{
+                .symbol = "tes",
+                .token = .Tesselate,
+                .force_break = true,
+            }
         }, 
-        &.{
-            .Test,
-            .Tesselate,
-        },
         identifier_fallback,
     );
     defer st.deinit(gpa);
 
-    const str = "test ing";
+    const str = "tesl";
 
     const ts = try zoken.TokenStream(Token).init(gpa, st, str);
     std.debug.print("{f}", .{ts});
