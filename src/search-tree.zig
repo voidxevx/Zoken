@@ -79,7 +79,9 @@ pub fn SearchTree(comptime Token: type) type {
                 return try self.fallback(buffer);
             }
 
-            fn __traverse(_: *anyopaque, _: u8) State.ReturnStatus {
+            fn __traverse(_: *anyopaque, ch: u8) State.ReturnStatus {
+                if (std.ascii.isWhitespace(ch))
+                    return .Break;
                 return .Stays;
             }
 
@@ -119,7 +121,7 @@ pub fn SearchTree(comptime Token: type) type {
 
             /// A rule for entering a custom state
             pub const EntryStateRule = struct {
-                rule: *const fn(u8) anyerror!bool,
+                rule: *const fn(u8) bool,
                 state: *State,
             };
 
@@ -143,12 +145,21 @@ pub fn SearchTree(comptime Token: type) type {
             }
 
             fn __traverse(ptr: *anyopaque, ch: u8) State.ReturnStatus {
+                std.debug.print("entering with: {c} ", .{ch});
+                if (std.ascii.isWhitespace(ch)) {
+                    std.debug.print("staying\n", .{});
+                    return .Stays;
+                }
+
                 const self: *EntryState = @ptrCast(@alignCast(ptr));
                 if (self.entry_points[ch]) |state| {
+                    std.debug.print("found!\n", .{});
                     return .{ .Changed = state };
                 } else if (self.check_rules(ch)) |state| {
+                    std.debug.print("rule found!\n", .{});
                     return .{ .Changed = state };
                 } else {
+                    std.debug.print("exited\n", .{});
                     return .Exited;
                 }
             }
@@ -163,11 +174,13 @@ pub fn SearchTree(comptime Token: type) type {
             }
 
             /// Attaches a state to a character
-            pub fn attach_state(self: *EntryState, ch: u8, state: *State) Error!void {
-                if (self.entry_points[ch] == null) {
-                    self.*.entry_points[ch] = state;
+            pub fn attach_state(self: *EntryState, ch: u8, state: *State) Error!?*State {
+                std.debug.print("entry-attaching {c}\n", .{ch});
+                if (self.entry_points[ch]) |exits| {
+                    return exits;
                 } else {
-                    return Error.StateAlreadyBound;
+                    self.*.entry_points[ch] = state;
+                    return null;
                 }
             }
 
@@ -221,12 +234,16 @@ pub fn SearchTree(comptime Token: type) type {
             }
 
             fn __traverse(ptr: *anyopaque, ch: u8) State.ReturnStatus {
+                std.debug.print("kw: {c} ", .{ch});
                 const self: *KeywordState = @ptrCast(@alignCast(ptr));
                 if (self.children[ch]) |child| {
+                    std.debug.print("found!\n", .{});
                     return .{ .Changed = child.interface() };
-                } else if (self.force_break) {
+                } else if (self.force_break or std.ascii.isWhitespace(ch)) {
+                    std.debug.print("breaking\n", .{});
                     return .Break;
                 } else {
+                    std.debug.print("exiting\n", .{});
                     return .Exited;
                 }
             }
@@ -258,7 +275,9 @@ pub fn SearchTree(comptime Token: type) type {
                 token: ?Token, 
                 breaks: bool
             ) !*KeywordState {
+                std.debug.print("kw-attaching: {c} ", .{character});
                 if (self.children[character]) |child| {
+                    std.debug.print("already had\n", .{});
                     if (child.token == null) {
                         child.*.token = token;
                     } else {
@@ -267,6 +286,7 @@ pub fn SearchTree(comptime Token: type) type {
                     child.*.force_break = breaks;
                     return child;
                 } else {
+                    std.debug.print("new branch!\n", .{});
                     const child = try KeywordState.new(gpa, token, breaks);
                     self.*.children[character] = child;
                     return child;
@@ -344,7 +364,9 @@ pub fn SearchTree(comptime Token: type) type {
 
                 if (self.custom_states) |custom_states| 
                 for (custom_states) |state| {
-                    try self.keyword_head.attach_state(state.entry_character, state.state);
+                    if (try self.keyword_head.attach_state(state.entry_character, state.state)) |_| {
+                        return EntryState.Error.StateAlreadyBound;
+                    }
                 };
             }
 
@@ -354,6 +376,10 @@ pub fn SearchTree(comptime Token: type) type {
                     .keywords = self.keyword_head.interface(),
                     .fallback_state = try FallbackState.new(self.gpa, fallback),
                 };
+            }
+
+            fn reset_current(self: *Generator) void {
+                self.*.current = .{ .entry = self.keyword_head };
             }
 
             /// Attaches a keyword state to the current state
@@ -366,7 +392,10 @@ pub fn SearchTree(comptime Token: type) type {
                 switch (self.*.current) {
                     .entry => |entry| {
                         const state = try KeywordState.new(self.gpa, token, breaks);
-                        try entry.attach_state(ch, state.interface());
+                        if (try entry.attach_state(ch, state.interface())) |exists| {
+                            state.interface().deinit(self.gpa);
+                            return @ptrCast(@alignCast(exists));
+                        }
                         return state;
                     },
                     .keyword => |kw| {
@@ -377,18 +406,20 @@ pub fn SearchTree(comptime Token: type) type {
 
             /// Traces a keyword generating a branch from its characters
             fn trace_branch(self: *Generator, keyword_token: KeywordToken) !void {
+                self.reset_current();
+
                 const keyword = keyword_token.symbol;
                 const token = keyword_token.token;
                 const breaks = keyword_token.force_break;
 
                 for (0..keyword.len - 1) |i| {
                     const ch: u8 = keyword[i];
-                    self.*.current = .{ .keyword = try self.attach_current(ch, null, false) };
+                    const state = try self.attach_current(ch, null, false);
+                    self.*.current = .{ .keyword =  state };
                 }
 
                 const ch: u8 = keyword[keyword.len - 1];
                 _ = try self.attach_current(ch, token, breaks);
-                self.*.current = .{ .entry =  self.keyword_head };
             }
         };
 

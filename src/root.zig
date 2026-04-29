@@ -126,22 +126,13 @@ pub fn TokenStream(comptime Token: type) type {
                     defer self.*.idx += 1;
                     const ch = self.string[self.idx];
 
-                    // Breaks on whitespace
-                    if (std.ascii.isWhitespace(ch)) {
-                        try self.push_current();
-                        self.*.buffer_size = 0;
-                        self.reset_state();
-                    }
-
                     // Traverses the search tree
                     switch (self.current_state.traverse(ch)) {
                         .Exited => {
                             self.*.current_state = self.search_tree.fallback_state.interface();
                         },
                         .Break => {
-                            if (try self.construct_buffer()) |token| {
-                                try self.push_token(token);
-                            }
+                            try self.push_current();
                             self.reset_state();
                             self.*.buffer_size = 0;
                         },

@@ -2,27 +2,31 @@
 const std = @import("std");
 const zoken = @import("Zoken");
 
-const Token = enum {
+const Token = union(enum) {
     Test,
     Tesselate,
-    Other,
+    Other: []const u8,
 
     pub fn format(self: *const Token, writer: *std.io.Writer) std.io.Writer.Error!void {
         switch (self.*) {
             .Test => try writer.print("Test", .{}),
             .Tesselate => try writer.print("Tesselate", .{}),
-            .Other => try writer.print("other", .{}),
+            .Other => |c| try writer.print("{s}", .{c}),
         }
     }
 };
 
-fn identifier_fallback(_: []const u8) anyerror!Token {
-    return .Other;
+const allocator = std.heap.page_allocator;
+fn identifier_fallback(buf: []const u8) anyerror!Token {
+    const ident = try allocator.alloc(u8, buf.len);
+    @memcpy(ident, buf);
+    return .{ .Other = ident };
 }
 
 pub fn main() !void {
     const gpa = std.heap.page_allocator;
 
+    std.debug.print("Generating:\n", .{});
     var st: zoken.SearchTree(Token) = try .init(
         gpa,
         &.{
@@ -42,6 +46,7 @@ pub fn main() !void {
     );
     defer st.deinit(gpa);
 
+    std.debug.print("\nTokenizing:\n", .{});
     const str = "tesl";
 
     const ts = try zoken.TokenStream(Token).init(gpa, st, str);
