@@ -50,7 +50,7 @@ pub fn SearchTree(comptime Token: type) type {
                 return self.vtable.traverse(self, ch);
             }
 
-            /// deallocates the state and any of its children
+            /// deallocate the state and any of its children
             pub fn deinit(self: *State, gpa: std.mem.Allocator) void {
                 self.vtable.deinit(self, gpa);
             }
@@ -131,7 +131,7 @@ pub fn SearchTree(comptime Token: type) type {
                 return null;
             }
 
-            /// Checks all custom rules for optional state enterances
+            /// Checks all custom rules for optional state entrances
             fn check_rules(self: *EntryState, ch: u8) ?*State {
                 for (self.entry_rules) |rule| {
                     if (rule.rule(ch)) {
@@ -188,9 +188,9 @@ pub fn SearchTree(comptime Token: type) type {
         /// Keyword state
         /// 
         /// Main node states that create the search tree. Each state points to up to 256 other states 
-        /// that each represent a character that could procede this one. If there is no matching character
-        /// that procedes this state it will optionally break pushing the token at the current point of exit 
-        /// and procceed to the fallback state.
+        /// that each represent a character that could precede this one. If there is no matching character
+        /// that precedes this state it will optionally break pushing the token at the current point of exit 
+        /// and proceed to the fallback state.
         pub const KeywordState = struct {
             const __vtable: State.VTable = .{
                 .construct = KeywordState.__construct,

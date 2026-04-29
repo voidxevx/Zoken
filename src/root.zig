@@ -70,7 +70,7 @@ pub fn TokenStream(comptime Token: type) type {
                 };
             }
 
-            /// Ends the tokenizer freeing the allocated resourses and creating a token stream
+            /// Ends the tokenizer freeing the allocated resources and creating a token stream
             fn finish(self: *Tokenizer) !TokenStream(Token) {
                 self.gpa.free(self.buffer);
 
@@ -101,12 +101,12 @@ pub fn TokenStream(comptime Token: type) type {
                 self.*.buffer_size += 1;
             }
 
-            /// envokes the current state to generate a token from the buffer
+            /// evokes the current state to generate a token from the buffer
             fn construct_buffer(self: *Tokenizer) !?Token {
                 return self.current_state.construct(self.buffer[0..self.buffer_size]);
             }
 
-            /// envokes the fallback state to generate a token from the buffer
+            /// evokes the fallback state to generate a token from the buffer
             fn construct_fallback(self: *Tokenizer) !Token {
                 return self.search_tree.fallback_state.fallback(self.buffer[0..self.buffer_size]);
             }
